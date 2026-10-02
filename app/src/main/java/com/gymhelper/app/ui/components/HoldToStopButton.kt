@@ -1,6 +1,7 @@
 package com.gymhelper.app.ui.components
 
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,18 +24,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.gymhelper.app.ui.theme.SessionStopRed
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 private const val HOLD_MS = 3000L
+private const val POLL_MS = 32L
 
 @Composable
 fun HoldToStopButton(
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
+    val onStopUpdated by rememberUpdatedState(onStop)
     var holdProgress by remember { mutableFloatStateOf(0f) }
 
     Column(modifier = modifier.fillMaxWidth()) {
@@ -51,31 +51,41 @@ fun HoldToStopButton(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
-                .pointerInput(onStop) {
-                    detectTapGestures(
-                        onPress = {
-                            var completed = false
-                            val job = scope.launch {
-                                val started = System.currentTimeMillis()
-                                while (isActive) {
-                                    delay(50)
-                                    val elapsed = System.currentTimeMillis() - started
-                                    holdProgress = (elapsed / HOLD_MS.toFloat()).coerceIn(0f, 1f)
-                                    if (elapsed >= HOLD_MS) {
-                                        completed = true
-                                        holdProgress = 1f
-                                        onStop()
-                                        break
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val pointerId = down.id
+                        val startedAt = System.currentTimeMillis()
+                        try {
+                            while (true) {
+                                val elapsed = System.currentTimeMillis() - startedAt
+                                holdProgress = (elapsed / HOLD_MS.toFloat()).coerceIn(0f, 1f)
+
+                                if (elapsed >= HOLD_MS) {
+                                    holdProgress = 0f
+                                    onStopUpdated()
+                                    return@awaitEachGesture
+                                }
+
+                                val releasedEarly = withTimeoutOrNull(POLL_MS) {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val stillPressed = event.changes.any {
+                                            it.id == pointerId && it.pressed
+                                        }
+                                        if (!stillPressed) {
+                                            return@withTimeoutOrNull true
+                                        }
                                     }
                                 }
+                                if (releasedEarly == true) {
+                                    return@awaitEachGesture
+                                }
                             }
-                            tryAwaitRelease()
-                            job.cancel()
-                            if (!completed) {
-                                holdProgress = 0f
-                            }
-                        },
-                    )
+                        } finally {
+                            holdProgress = 0f
+                        }
+                    }
                 },
             shape = RoundedCornerShape(12.dp),
             color = SessionStopRed,
