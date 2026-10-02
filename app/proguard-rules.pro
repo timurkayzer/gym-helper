@@ -1,0 +1,1 @@
+-keep class com.gymhelper.app.data.** { *; }
