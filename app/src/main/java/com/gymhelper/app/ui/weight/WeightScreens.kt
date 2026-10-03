@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -44,11 +45,13 @@ import com.gymhelper.app.data.WeightDay
 import com.gymhelper.app.data.WeightExercise
 import com.gymhelper.app.data.WeightProgram
 import com.gymhelper.app.ui.components.AppScaffold
+import com.gymhelper.app.ui.components.ImportDaysDialog
 import com.gymhelper.app.ui.components.ReorderableExerciseList
 import com.gymhelper.app.ui.components.ReorderableTextRow
 import com.gymhelper.app.ui.components.ScreenPadding
 import com.gymhelper.app.ui.components.TextInputDialog
 import com.gymhelper.app.util.ListCopyFormatter
+import com.gymhelper.app.util.ListImportParser
 import com.gymhelper.app.weight.WeightSessionViewModel
 import com.gymhelper.app.weight.WeightSessionViewModelFactory
 import kotlinx.coroutines.launch
@@ -139,6 +142,7 @@ fun WeightProgramDetailScreen(
     var program by remember { mutableStateOf<WeightProgram?>(null) }
     var showAddDay by remember { mutableStateOf(false) }
     var renameProgram by remember { mutableStateOf(false) }
+    var showImport by remember { mutableStateOf(false) }
 
     androidx.compose.runtime.LaunchedEffect(programId) {
         program = repository.getWeightProgram(programId)
@@ -151,16 +155,28 @@ fun WeightProgramDetailScreen(
             IconButton(onClick = { renameProgram = true }) {
                 Icon(Icons.Default.Edit, contentDescription = "Rename")
             }
+            IconButton(onClick = { showImport = true }) {
+                Icon(Icons.Default.ContentPaste, contentDescription = "Import days")
+            }
             IconButton(onClick = { showAddDay = true }) {
                 Icon(Icons.Default.Add, contentDescription = "Add day")
             }
         },
     ) { padding ->
         ScreenPadding(padding) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(days, key = { it.id }) { day ->
+            ReorderableExerciseList(
+                items = days,
+                key = { it.id },
+                modifier = Modifier.fillMaxSize(),
+                onReorder = { ordered ->
+                    scope.launch {
+                        repository.reorderWeightDays(ordered)
+                    }
+                },
+                itemContent = { day, dragModifier ->
                     WeightDayCard(
                         day = day,
+                        modifier = dragModifier,
                         onEdit = { onEditDay(day.id) },
                         onStart = { onStartSession(day.id) },
                         onCopy = {
@@ -175,9 +191,24 @@ fun WeightProgramDetailScreen(
                             scope.launch { repository.deleteWeightDay(day.id) }
                         },
                     )
-                }
-            }
+                },
+            )
         }
+    }
+
+    if (showImport) {
+        ImportDaysDialog(
+            hint = "Paste text copied with the copy-list button. Separate several days with a blank line.",
+            onDismiss = { showImport = false },
+            onConfirm = { text ->
+                val parsed = ListImportParser.parseWeightDays(text)
+                scope.launch {
+                    repository.importWeightDays(programId, parsed)
+                    Toast.makeText(context, "Imported ${parsed.size} day(s)", Toast.LENGTH_SHORT).show()
+                    showImport = false
+                }
+            },
+        )
     }
 
     if (showAddDay) {
@@ -214,14 +245,14 @@ fun WeightProgramDetailScreen(
 @Composable
 private fun WeightDayCard(
     day: WeightDay,
+    modifier: Modifier = Modifier,
     onEdit: () -> Unit,
     onStart: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -257,6 +288,7 @@ fun WeightDayEditScreen(
     val repository = (context.applicationContext as GymHelperApp).repository
     val scope = rememberCoroutineScope()
     var day by remember { mutableStateOf<WeightDay?>(null) }
+    var renameDay by remember { mutableStateOf(false) }
     val exercises by repository.observeWeightExercises(dayId).collectAsState(initial = emptyList())
     var showAddExercise by remember { mutableStateOf(false) }
     var editingExercise by remember { mutableStateOf<WeightExercise?>(null) }
@@ -265,7 +297,15 @@ fun WeightDayEditScreen(
         day = repository.getWeightDay(dayId)
     }
 
-    AppScaffold(title = day?.name ?: "Edit day", onBack = onBack) { padding ->
+    AppScaffold(
+        title = day?.name ?: "Edit day",
+        onBack = onBack,
+        actions = {
+            IconButton(onClick = { renameDay = true }) {
+                Icon(Icons.Default.Edit, contentDescription = "Rename day")
+            }
+        },
+    ) { padding ->
         ScreenPadding(padding) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(
@@ -326,6 +366,23 @@ fun WeightDayEditScreen(
                 )
             }
         }
+    }
+
+    if (renameDay && day != null) {
+        TextInputDialog(
+            title = "Rename day",
+            confirmLabel = "Save",
+            initialValue = day!!.name,
+            onDismiss = { renameDay = false },
+            onConfirm = { name ->
+                scope.launch {
+                    val updated = day!!.copy(name = name)
+                    repository.updateWeightDay(updated)
+                    day = updated
+                    renameDay = false
+                }
+            },
+        )
     }
 
     if (showAddExercise) {

@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -56,6 +57,7 @@ import com.gymhelper.app.ui.components.KeepScreenOnEffect
 import com.gymhelper.app.ui.components.SessionActionButton
 import com.gymhelper.app.ui.components.NumberFieldSpec
 import com.gymhelper.app.ui.components.NumberInputDialog
+import com.gymhelper.app.ui.components.ImportDaysDialog
 import com.gymhelper.app.ui.components.ReorderableExerciseList
 import com.gymhelper.app.ui.components.ReorderableTextRow
 import com.gymhelper.app.ui.components.ScreenPadding
@@ -63,6 +65,7 @@ import com.gymhelper.app.ui.components.TextInputDialog
 import com.gymhelper.app.ui.theme.SessionContinueGreen
 import com.gymhelper.app.ui.theme.SessionPauseYellow
 import com.gymhelper.app.util.ListCopyFormatter
+import com.gymhelper.app.util.ListImportParser
 import com.gymhelper.app.util.formatSecondsAsMmSs
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.launch
@@ -153,6 +156,7 @@ fun IntervalProgramDetailScreen(
     var program by remember { mutableStateOf<IntervalProgram?>(null) }
     var showAddDay by remember { mutableStateOf(false) }
     var renameProgram by remember { mutableStateOf(false) }
+    var showImport by remember { mutableStateOf(false) }
 
     androidx.compose.runtime.LaunchedEffect(programId) {
         program = repository.getIntervalProgram(programId)
@@ -165,16 +169,28 @@ fun IntervalProgramDetailScreen(
             IconButton(onClick = { renameProgram = true }) {
                 Icon(Icons.Default.Edit, contentDescription = "Rename")
             }
+            IconButton(onClick = { showImport = true }) {
+                Icon(Icons.Default.ContentPaste, contentDescription = "Import days")
+            }
             IconButton(onClick = { showAddDay = true }) {
                 Icon(Icons.Default.Add, contentDescription = "Add day")
             }
         },
     ) { padding ->
         ScreenPadding(padding) {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(days, key = { it.id }) { day ->
+            ReorderableExerciseList(
+                items = days,
+                key = { it.id },
+                modifier = Modifier.fillMaxSize(),
+                onReorder = { ordered ->
+                    scope.launch {
+                        repository.reorderIntervalDays(ordered)
+                    }
+                },
+                itemContent = { day, dragModifier ->
                     IntervalDayCard(
                         day = day,
+                        modifier = dragModifier,
                         onEdit = { onEditDay(day.id) },
                         onStart = { onStartSession(day.id) },
                         onCopy = {
@@ -189,9 +205,24 @@ fun IntervalProgramDetailScreen(
                             scope.launch { repository.deleteIntervalDay(day.id) }
                         },
                     )
-                }
-            }
+                },
+            )
         }
+    }
+
+    if (showImport) {
+        ImportDaysDialog(
+            hint = "Paste text copied with the copy-list button. Separate several days with a blank line.",
+            onDismiss = { showImport = false },
+            onConfirm = { text ->
+                val parsed = ListImportParser.parseIntervalDays(text)
+                scope.launch {
+                    repository.importIntervalDays(programId, parsed)
+                    Toast.makeText(context, "Imported ${parsed.size} day(s)", Toast.LENGTH_SHORT).show()
+                    showImport = false
+                }
+            },
+        )
     }
 
     if (showAddDay) {
@@ -228,14 +259,14 @@ fun IntervalProgramDetailScreen(
 @Composable
 private fun IntervalDayCard(
     day: IntervalDay,
+    modifier: Modifier = Modifier,
     onEdit: () -> Unit,
     onStart: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = modifier
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -273,6 +304,7 @@ fun IntervalDayEditScreen(
     val repository = (context.applicationContext as GymHelperApp).repository
     val scope = rememberCoroutineScope()
     var day by remember { mutableStateOf<IntervalDay?>(null) }
+    var renameDay by remember { mutableStateOf(false) }
     val exercises by repository.observeIntervalExercises(dayId).collectAsState(initial = emptyList())
     var showAddExercise by remember { mutableStateOf(false) }
     var showTiming by remember { mutableStateOf(false) }
@@ -282,7 +314,15 @@ fun IntervalDayEditScreen(
         day = repository.getIntervalDay(dayId)
     }
 
-    AppScaffold(title = day?.name ?: "Edit day", onBack = onBack) { padding ->
+    AppScaffold(
+        title = day?.name ?: "Edit day",
+        onBack = onBack,
+        actions = {
+            IconButton(onClick = { renameDay = true }) {
+                Icon(Icons.Default.Edit, contentDescription = "Rename day")
+            }
+        },
+    ) { padding ->
         ScreenPadding(padding) {
             Column(modifier = Modifier.fillMaxSize()) {
                 day?.let { current ->
@@ -362,6 +402,23 @@ fun IntervalDayEditScreen(
     }
 
     val defaultRound = day?.roundSeconds ?: 30
+    if (renameDay && day != null) {
+        TextInputDialog(
+            title = "Rename day",
+            confirmLabel = "Save",
+            initialValue = day!!.name,
+            onDismiss = { renameDay = false },
+            onConfirm = { name ->
+                scope.launch {
+                    val updated = day!!.copy(name = name)
+                    repository.updateIntervalDay(updated)
+                    day = updated
+                    renameDay = false
+                }
+            },
+        )
+    }
+
     if (showAddExercise) {
         IntervalExerciseDialog(
             title = "New exercise",

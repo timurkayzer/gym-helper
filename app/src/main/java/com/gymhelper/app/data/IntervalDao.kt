@@ -25,11 +25,21 @@ interface IntervalDao {
     @Query("SELECT * FROM interval_programs WHERE id = :programId")
     suspend fun getProgram(programId: Long): IntervalProgram?
 
-    @Query("SELECT * FROM interval_days WHERE programId = :programId ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM interval_days WHERE programId = :programId ORDER BY sortOrder, id")
     fun observeDays(programId: Long): Flow<List<IntervalDay>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDay(day: IntervalDay): Long
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM interval_days WHERE programId = :programId")
+    suspend fun nextDaySortOrder(programId: Long): Int
+
+    @Transaction
+    suspend fun reorderDays(ordered: List<IntervalDay>) {
+        ordered.forEachIndexed { index, day ->
+            updateDay(day.copy(sortOrder = index))
+        }
+    }
 
     @Update
     suspend fun updateDay(day: IntervalDay)

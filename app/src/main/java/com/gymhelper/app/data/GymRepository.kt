@@ -1,5 +1,7 @@
 package com.gymhelper.app.data
 
+import com.gymhelper.app.util.ParsedIntervalDay
+import com.gymhelper.app.util.ParsedWeightDay
 import kotlinx.coroutines.flow.Flow
 
 class GymRepository(
@@ -20,7 +22,15 @@ class GymRepository(
     fun observeIntervalDays(programId: Long) = intervalDao.observeDays(programId)
 
     suspend fun createIntervalDay(programId: Long, name: String): Long =
-        intervalDao.insertDay(IntervalDay(programId = programId, name = name))
+        intervalDao.insertDay(
+            IntervalDay(
+                programId = programId,
+                name = name,
+                sortOrder = intervalDao.nextDaySortOrder(programId),
+            ),
+        )
+
+    suspend fun reorderIntervalDays(ordered: List<IntervalDay>) = intervalDao.reorderDays(ordered)
 
     suspend fun updateIntervalDay(day: IntervalDay) = intervalDao.updateDay(day)
 
@@ -68,7 +78,15 @@ class GymRepository(
     fun observeWeightDays(programId: Long) = weightDao.observeDays(programId)
 
     suspend fun createWeightDay(programId: Long, name: String): Long =
-        weightDao.insertDay(WeightDay(programId = programId, name = name))
+        weightDao.insertDay(
+            WeightDay(
+                programId = programId,
+                name = name,
+                sortOrder = weightDao.nextDaySortOrder(programId),
+            ),
+        )
+
+    suspend fun reorderWeightDays(ordered: List<WeightDay>) = weightDao.reorderDays(ordered)
 
     suspend fun updateWeightDay(day: WeightDay) = weightDao.updateDay(day)
 
@@ -96,6 +114,35 @@ class GymRepository(
 
     suspend fun reorderWeightExercises(dayId: Long, ordered: List<WeightExercise>) =
         weightDao.reorderExercises(dayId, ordered)
+
+    suspend fun importWeightDays(programId: Long, days: List<ParsedWeightDay>) {
+        days.forEach { parsed ->
+            val dayId = createWeightDay(programId, parsed.name)
+            parsed.exercises.forEachIndexed { index, e ->
+                addWeightExercise(dayId, e.name, e.sets, e.reps, index)
+            }
+        }
+    }
+
+    suspend fun importIntervalDays(programId: Long, days: List<ParsedIntervalDay>) {
+        days.forEach { parsed ->
+            val defaults = IntervalDay(programId = programId, name = parsed.name)
+            val dayId = intervalDao.insertDay(
+                defaults.copy(
+                    roundSeconds = parsed.roundSeconds ?: defaults.roundSeconds,
+                    restBetweenExercisesSeconds =
+                        parsed.restBetweenExercisesSeconds ?: defaults.restBetweenExercisesSeconds,
+                    restBetweenRoundsSeconds =
+                        parsed.restBetweenRoundsSeconds ?: defaults.restBetweenRoundsSeconds,
+                    rounds = parsed.rounds ?: defaults.rounds,
+                    sortOrder = intervalDao.nextDaySortOrder(programId),
+                ),
+            )
+            parsed.exercises.forEachIndexed { index, e ->
+                addIntervalExercise(dayId, e.name, index, e.durationSeconds)
+            }
+        }
+    }
 
     suspend fun saveWeightSession(
         dayId: Long,

@@ -25,11 +25,21 @@ interface WeightDao {
     @Query("SELECT * FROM weight_programs WHERE id = :programId")
     suspend fun getProgram(programId: Long): WeightProgram?
 
-    @Query("SELECT * FROM weight_days WHERE programId = :programId ORDER BY name COLLATE NOCASE")
+    @Query("SELECT * FROM weight_days WHERE programId = :programId ORDER BY sortOrder, id")
     fun observeDays(programId: Long): Flow<List<WeightDay>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDay(day: WeightDay): Long
+
+    @Query("SELECT COALESCE(MAX(sortOrder), -1) + 1 FROM weight_days WHERE programId = :programId")
+    suspend fun nextDaySortOrder(programId: Long): Int
+
+    @Transaction
+    suspend fun reorderDays(ordered: List<WeightDay>) {
+        ordered.forEachIndexed { index, day ->
+            updateDay(day.copy(sortOrder = index))
+        }
+    }
 
     @Update
     suspend fun updateDay(day: WeightDay)

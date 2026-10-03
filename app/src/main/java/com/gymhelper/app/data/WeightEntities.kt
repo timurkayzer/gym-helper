@@ -1,5 +1,6 @@
 package com.gymhelper.app.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -27,6 +28,7 @@ data class WeightDay(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val programId: Long,
     val name: String,
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
 )
 
 @Entity(
